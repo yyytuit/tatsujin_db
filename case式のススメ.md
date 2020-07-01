@@ -385,3 +385,247 @@ DETAIL:  Key (p_key)=(b) already exists.
 - 本書で上記を紹介しているが、どうやら主キーの入れ替えはエラーがでる。
 
 ## テーブル同士のマッチング
+
+- 次のような資格予備校の講座一覧に関するテーブルと月々に開講されている講座を管理するテーブルを考える。
+
+![スクリーンショット 2020-07-01 23 27 17](https://user-images.githubusercontent.com/51355545/86255789-83723080-bbf2-11ea-8407-f955b71043e4.png)
+
+```sql
+CREATE TABLE CourseMaster
+(course_id   INTEGER PRIMARY KEY,
+ course_name VARCHAR(32) NOT NULL);
+
+INSERT INTO CourseMaster VALUES(1, '経理入門');
+INSERT INTO CourseMaster VALUES(2, '財務知識');
+INSERT INTO CourseMaster VALUES(3, '簿記検定');
+INSERT INTO CourseMaster VALUES(4, '税理士');
+
+SELECT * FROM CourseMaster;
+ course_id | course_name
+-----------+-------------
+         1 | 経理入門
+         2 | 財務知識
+         3 | 簿記検定
+         4 | 税理士
+(4 rows)
+
+CREATE TABLE OpenCourses
+(month       INTEGER ,
+ course_id   INTEGER ,
+    PRIMARY KEY(month, course_id));
+
+INSERT INTO OpenCourses VALUES(200706, 1);
+INSERT INTO OpenCourses VALUES(200706, 3);
+INSERT INTO OpenCourses VALUES(200706, 4);
+INSERT INTO OpenCourses VALUES(200707, 4);
+INSERT INTO OpenCourses VALUES(200708, 2);
+INSERT INTO OpenCourses VALUES(200708, 4);
+
+SELECT * FROM OpenCourses;
+ month  | course_id
+--------+-----------
+ 201806 |         1
+ 201806 |         3
+ 201806 |         4
+ 201807 |         4
+ 201808 |         2
+ 201808 |         4
+(6 rows)
+```
+
+OpenCourses のある月に、CourseMaster テーブルの講座が存在するかどうかのチェックを行う。
+このマッチングの条件を CASE 式によって書くことができる。
+
+```sql
+--テーブルのマッチング：IN述語の利用
+SELECT course_name,
+       CASE WHEN course_id IN
+                    (SELECT course_id FROM OpenCourses
+                      WHERE month = 201806) THEN '○'
+            ELSE '×' END AS "6 月",
+       CASE WHEN course_id IN
+                    (SELECT course_id FROM OpenCourses
+                      WHERE month = 201807) THEN '○'
+            ELSE '×' END AS "7 月",
+       CASE WHEN course_id IN
+                    (SELECT course_id FROM OpenCourses
+                      WHERE month = 201808) THEN '○'
+            ELSE '×' END AS "8 月"
+  FROM CourseMaster;
+
+          ELSE '×' END AS "8 月"
+postgres-#   FROM CourseMaster;
+ course_name | 6 月 | 7 月 | 8 月
+-------------+------+------+------
+ 経理入門    | ○    | ×    | ×
+ 財務知識    | ×    | ×    | ○
+ 簿記検定    | ○    | ×    | ×
+ 税理士      | ○    | ○    | ○
+(4 rows)
+```
+
+```sql
+--テーブルのマッチング：EXISTS述語の利用
+SELECT CM.course_name,
+       CASE WHEN EXISTS
+                  (SELECT course_id FROM OpenCourses OC
+                    WHERE month = 201806
+                      AND OC.course_id = CM.course_id) THEN '○'
+            ELSE '×' END AS "6 月",
+       CASE WHEN EXISTS
+                  (SELECT course_id FROM OpenCourses OC
+                    WHERE month = 201807
+                      AND OC.course_id = CM.course_id) THEN '○'
+            ELSE '×' END AS "7 月",
+       CASE WHEN EXISTS
+                  (SELECT course_id FROM OpenCourses OC
+                    WHERE month = 201808
+                      AND OC.course_id = CM.course_id) THEN '○'
+            ELSE '×' END AS "8 月"
+  FROM CourseMaster CM;
+
+  course_name | 6 月 | 7 月 | 8 月
+-------------+------+------+------
+ 経理入門    | ○    | ×    | ×
+ 財務知識    | ×    | ×    | ○
+ 簿記検定    | ○    | ×    | ×
+ 税理士      | ○    | ○    | ○
+(4 rows)
+```
+
+- どちらのクエリも月数が増えても SELECT 句を修正するだけでよいので拡張性に富むクエリ。
+
+  IN と EXISTS どちらを使っても、結果は変わらない。
+
+  パフォーマンスは EXISTS のほうがよい。
+
+  サブクエリで(month, course_id)という主キーのインデクスが利用できるため、特に OpenCourses テーブルサイズが大きい場合は優位。
+
+## CASE 式の中で集約関数を使う
+
+- 学生と所属クラブを一覧するテーブルを考える。主キーは学生番号、クラブ ID
+
+![スクリーンショット 2020-07-02 0 04 06](https://user-images.githubusercontent.com/51355545/86259907-93404380-bbf7-11ea-9651-8e255ad170aa.png)
+
+```sql
+CREATE TABLE StudentClub
+(std_id  INTEGER,
+ club_id INTEGER,
+ club_name VARCHAR(32),
+ main_club_flg CHAR(1),
+ PRIMARY KEY (std_id, club_id));
+
+INSERT INTO StudentClub VALUES(100, 1, '野球',        'Y');
+INSERT INTO StudentClub VALUES(100, 2, '吹奏楽',      'N');
+INSERT INTO StudentClub VALUES(200, 2, '吹奏楽',      'N');
+INSERT INTO StudentClub VALUES(200, 3, 'バドミントン','Y');
+INSERT INTO StudentClub VALUES(200, 4, 'サッカー',    'N');
+INSERT INTO StudentClub VALUES(300, 4, 'サッカー',    'N');
+INSERT INTO StudentClub VALUES(400, 5, '水泳',        'N');
+INSERT INTO StudentClub VALUES(500, 6, '囲碁',        'N');
+
+SELECT * FROM StudentClub;
+ std_id | club_id |  club_name   | main_club_flg
+--------+---------+--------------+---------------
+    100 |       1 | 野球         | Y
+    100 |       2 | 吹奏楽       | N
+    200 |       2 | 吹奏楽       | N
+    200 |       3 | バドミントン | Y
+    200 |       4 | サッカー     | N
+    300 |       4 | サッカー     | N
+    400 |       5 | 水泳         | N
+    500 |       6 | 囲碁         | N
+(8 rows)
+```
+
+- 学生は複数のクラブに所属している場合もある。
+
+  また 1 つにしか所属してない場合もある。
+
+  複数クラブを掛け持ちしている学生は、主なクラブを示す列に Y または N の値が入る。
+
+  1 つだけのクラブに専念している学生の場合は N が入る。
+
+- 次のような条件でクエリを発行する。
+
+  1. １つだけのクラブに所属している学生については、そのクラブ ID を取得する
+
+  1. 複数おクラブを掛け持ちしている学生については、主なクラブの ID を取得する。
+
+  複数のクラブに所属しているか否かは集計結果に対する条件なので HVING 句を使う。
+
+```sql
+--条件1：1つのクラブに専念している学生を選択
+SELECT std_id, MAX(club_id) AS main_club
+  FROM StudentClub
+ GROUP BY std_id
+HAVING COUNT(*) = 1;
+
+std_id | main_club
+--------+-----------
+    500 |         6
+    400 |         5
+    300 |         4
+(3 rows)
+
+--条件2：クラブをかけ持ちしている学生を選択
+SELECT std_id, club_id AS main_club
+  FROM StudentClub
+ WHERE main_club_flg = 'Y';
+
+ std_id | main_club
+--------+-----------
+    100 |         1
+    200 |         3
+(2 rows)
+```
+
+- 上記は CASE 式で 1 つの SQL で書くことができる
+
+```sql
+SELECT std_id,
+       CASE WHEN COUNT(*) = 1 --1つのクラブに専念する学生の場合
+            THEN MAX(club_id)
+            ELSE MAX(CASE WHEN main_club_flg = 'Y'
+                          THEN club_id
+                          ELSE NULL END) END AS main_club
+  FROM StudentClub
+ GROUP BY std_id;
+
+std_id | main_club
+--------+-----------
+    500 |         6
+    200 |         3
+    400 |         5
+    300 |         4
+    100 |         1
+(5 rows)
+```
+
+- CASE 式の中に集約関数を書いて、さらにその中に CASE 式を書くという入れ子構造です。
+
+  通常は集約結果に対する条件は HAVING 句を使うが、CASE 式を使うと SELECT 句でも同等の条件分岐がかける。
+
+  HAVING 句で条件分岐させるのは素人のやること、プロは SELECT 句で分岐させる
+
+### CASE 式はどこにでもかける
+
+- SELECT 句
+
+- WHERE 句
+
+- GROUP BY 句
+
+- HAVING 句
+
+- ORDER BY 句
+
+- PARTITION BY 句
+
+- CHECK 制約の中
+
+- 関数の引数
+
+- 述語の引数
+
+- 他の式の中
