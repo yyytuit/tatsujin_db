@@ -12,7 +12,7 @@
   case 式を使うと、次のように記述できる
 
   ```sql
-  select * from PopTbl;
+  SELECT * from PopTbl;
   pref_name | population
   -----------+------------
   徳島      |        100
@@ -634,3 +634,165 @@ std_id | main_club
 
 1. ジョー・セルコ「プログラマのための SQL 第 4 版」
 1. ジョー・セルコ「SQL パズル 第 2 版」
+
+# 2 章演習
+
+## xyz の最大値
+
+```sql
+CREATE TABLE Greatests
+(key CHAR(1) PRIMARY KEY,
+ x   INTEGER NOT NULL,
+ y   INTEGER NOT NULL,
+ z   INTEGER NOT NULL);
+
+INSERT INTO Greatests VALUES('A', 1, 2, 3);
+INSERT INTO Greatests VALUES('B', 5, 5, 2);
+INSERT INTO Greatests VALUES('C', 4, 7, 1);
+INSERT INTO Greatests VALUES('D', 3, 3, 8);
+```
+
+- まずは x と y で比較
+
+```sql
+SELECT key,
+CASE WHEN x > y THEN x
+ELSE y
+END AS greatest
+FROM Greatests;
+
+ key | greatest
+-----+----------
+ A   |        2
+ B   |        5
+ C   |        7
+ D   |        3
+(4 rows)
+```
+
+- 上記だと z を含めた 3 つ以上の列の比較は難しい。やれなくもないが入れ子になって複雑になる。← 正解だった
+
+```sql
+SELECT key,
+CASE WHEN x > y THEN (CASE WHEN x > z THEN x ELSE z END )
+ELSE (CASE WHEN y > z THEN y ELSE z END) END AS greatest
+FROM Greatests;
+ key | greatest
+-----+----------
+ A   |        3
+ B   |        5
+ C   |        7
+ D   |        8
+(4 rows)
+```
+
+## 合計と再掲を表頭に出力する
+
+```sql
+select sex as "性別",
+sum(population) as "全国"
+from PopTbl2
+group by sex;
+性別 | 全国
+------+------
+2 | 845
+1 | 855
+(2 rows)
+```
+
+- 上記まではわかったがここから先が分からなかった。
+
+とりあえず徳島だけ出そうと考えた。
+
+エラーによると"poptbl2.pref_name"は aggregate(集約)機能をつけなければならないと。
+
+今一分からず答えをみたら、SUM()でくくればよかった。
+
+```sql
+SELECT sex AS "性別",
+SUM(population) AS "全国",
+CASE pref_name WHEN '徳島' THEN population ELSE 0 END AS "徳島"
+FROM PopTbl2 GROUP BY sex;
+
+ERROR:  column "poptbl2.pref_name" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 3: CASE pref_name WHEN '徳島' THEN population ELSE 0 END AS "徳...
+```
+
+- 下記が正解
+
+```sql
+SELECT sex AS "性別",
+SUM(population) AS "全国",
+SUM(CASE pref_name WHEN '徳島' THEN population ELSE 0 END) AS "徳島",
+SUM(CASE pref_name WHEN '香川' THEN population ELSE 0 END) AS "香川",
+SUM(CASE pref_name WHEN '愛媛' THEN population ELSE 0 END) AS "愛媛",
+SUM(CASE pref_name WHEN '高知' THEN population ELSE 0 END) AS "高知",
+SUM(CASE WHEN pref_name IN ('徳島', '香川', '愛媛', '高知') THEN population ELSE 0 END) AS "四国"
+FROM PopTbl2
+GROUP BY sex;
+
+性別 | 全国 | 徳島 | 香川 | 愛媛 | 高知 | 四国
+------+------+------+------+------+------+------
+2 | 845 | 40 | 100 | 50 | 100 | 290
+1 | 855 | 60 | 100 | 100 | 100 | 360
+(2 rows)
+```
+
+## ORDER BY でソート列を作る
+
+```sql
+SELECT key FROM Greatests
+ORDER BY key;
+ key
+-----
+ A
+ B
+ C
+ D
+(4 rows)
+```
+
+- 上記を B A C D の順番に並び変えるには？
+
+```sql
+SELECT key
+  FROM Greatests
+ ORDER BY CASE key
+          WHEN 'B' THEN 1
+          WHEN 'A' THEN 2
+          WHEN 'D' THEN 3
+          WHEN 'C' THEN 4
+          ELSE NULL END;
+
+key
+-----
+ B
+ A
+ D
+ C
+(4 rows)
+```
+
+- なるほど、ORDER BY 句は数字が割り当てられているということですね。
+
+なので下記のような sort_col が hidden で与えられているということですかね?
+
+```sql
+SELECT key,
+CASE key
+WHEN 'B' THEN 1
+WHEN 'A' THEN 2
+WHEN 'D' THEN 3
+WHEN 'C' THEN 4
+ELSE NULL END AS sort_col
+FROM Greatests
+ORDER BY sort_col;
+
+key | sort_col
+-----+----------
+ B   |        1
+ A   |        2
+ D   |        3
+ C   |        4
+(4 rows)
+```
