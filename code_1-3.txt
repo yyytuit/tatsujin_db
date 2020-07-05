@@ -128,7 +128,8 @@ SELECT P1.name, P1.price,
 SELECT P1.name, MAX(P1.price) AS price,
        COUNT(P2.name) +1 AS rank_1
   FROM Products P1 LEFT OUTER JOIN Products P2
-    ON P1.price < P2.price GROUP BY P1.name;
+    ON P1.price < P2.price GROUP BY P1.name
+    ORDER BY price DESC;
 
 --非集約化して、集合の包含関係を調べる
 SELECT P1.name, P2.name
